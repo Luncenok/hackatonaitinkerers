@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AfterCare — Web Call Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #f0f4f8;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        h1 { font-size: 24px; color: #1e293b; margin-bottom: 8px; }
+        .subtitle { font-size: 14px; color: #64748b; margin-bottom: 32px; }
+        .btn {
+            padding: 16px 32px;
+            border-radius: 12px;
+            border: none;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin-bottom: 12px;
+            transition: all 0.2s;
+        }
+        .btn-start { background: #16a34a; color: white; }
+        .btn-start:hover { background: #15803d; }
+        .btn-stop { background: #dc2626; color: white; display: none; }
+        .btn-stop:hover { background: #b91c1c; }
+        .status {
+            margin-top: 20px;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            display: none;
+        }
+        .status.active { display: block; background: #f0fdf4; color: #16a34a; }
+        .status.error { display: block; background: #fef2f2; color: #dc2626; }
+        .status.info { display: block; background: #eff6ff; color: #2563eb; }
+        .transcript {
+            margin-top: 20px;
+            text-align: left;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 13px;
+        }
+        .transcript p {
+            padding: 6px 10px;
+            margin: 4px 0;
+            border-radius: 6px;
+        }
+        .transcript .assistant { background: #eff6ff; color: #1e40af; }
+        .transcript .user { background: #f0fdf4; color: #166534; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AfterCare Web Call</h1>
+        <p class="subtitle">Test the agent through your browser — no phone needed</p>
+
+        <button class="btn btn-start" id="startBtn" onclick="startCall()">Start Call</button>
+        <button class="btn btn-stop" id="stopBtn" onclick="stopCall()">End Call</button>
+
+        <div class="status" id="status"></div>
+        <div class="transcript" id="transcript"></div>
+    </div>
+
+    <script type="module">
+        import VapiModule from "https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/+esm";
+        const Vapi = VapiModule.default || VapiModule;
+
+        const params = new URLSearchParams(window.location.search);
+        const publicKey = params.get('key') || '';
+        const serverUrl = params.get('server') || window.location.origin;
+        let vapi = null;
+
+        function setStatus(text, type) {
+            const el = document.getElementById('status');
+            el.textContent = text;
+            el.className = 'status ' + type;
+        }
+
+        function addTranscript(role, text) {
+            const el = document.getElementById('transcript');
+            const p = document.createElement('p');
+            p.className = role;
+            p.textContent = `${role === 'assistant' ? 'Agent' : 'You'}: ${text}`;
+            el.appendChild(p);
+            el.scrollTop = el.scrollHeight;
+        }
+
+        const assistantConfig = {
+            model: {
+                provider: "google",
+                model: "gemini-2.0-flash",
+                messages: [
+                    {
+                        role: "system",
+                        content: "You are AfterCare, a warm and caring follow-up nurse calling a patient discharged from City Hospital.\n\nYour call has 3 phases:\n\nPHASE 1 — IDENTITY & GENERAL CHECK:\n1. Verify identity by asking date of birth. Correct DOB: March 15, 1955.\n2. Call report_identity_verified after confirmation.\n3. Ask how they're feeling generally.\n\nPHASE 2 — MEDICATION REVIEW:\n1. Call get_patient_medications (patient_id: 'patient-001').\n2. Ask about each medication one by one. After each, call report_medication_status.\n3. If patient is confused, offer photo verification: call send_photo_link.\n4. After photo is sent, wait then call check_photo_result with the token.\n5. Report matched and missing medications to patient.\n6. For missing meds, call create_alert (severity: 'warning', type: 'missing_medication').\n7. Call send_medication_schedule with any missing medication names.\n\nPHASE 3 — SYMPTOM CHECK:\n1. Ask about pain, fever, breathing, dizziness, nausea.\n2. If adverse reaction or red flag: call create_alert (severity: 'urgent', type: 'adverse_reaction').\n3. Tell patient care team will call back. Advise to stop medication if adverse reaction.\n4. Close warmly.\n5. Call save_call_report with summary.\n\nBe warm, empathetic, patient. Use simple language. One topic at a time."
+                    }
+                ],
+                tools: [
+                    { type: "function", function: { name: "report_identity_verified", description: "Report that the patient's identity has been verified.", parameters: { type: "object", properties: {} } }, server: { url: serverUrl + "/api/vapi-webhook" } },
+                    { type: "function", function: { name: "get_patient_medications", description: "Retrieve prescribed medications from discharge card.", parameters: { type: "object", properties: { patient_id: { type: "string" } }, required: ["patient_id"] } }, server: { url: serverUrl + "/api/vapi-webhook" } },
+                    { type: "function", function: { name: "report_medication_status", description: "Report medication check status to dashboard.", parameters: { type: "object", properties: { medication_name: { type: "string" }, status: { type: "string" } }, required: ["medication_name", "status"] } }, server: { url: serverUrl + "/api/vapi-webhook" } },
+                    { type: "function", function: { name: "send_photo_link", description: "Send SMS with photo upload link.", parameters: { type: "object", properties: { patient_id: { type: "string" } }, required: ["patient_id"] } }, server: { url: serverUrl + "/api/vapi-webhook" } },
+                    { type: "function", function: { name: "check_photo_result", description: "Check if medication photo has been analyzed.", parameters: { type: "object", properties: { token: { type: "string" } }, required: ["token"] } }, server: { url: serverUrl + "/api/vapi-webhook" } },
+                    { type: "function", function: { name: "send_medication_schedule", description: "Send medication schedule SMS.", parameters: { type: "object", properties: { patient_id: { type: "string" }, missing_medications: { type: "array", items: { type: "string" } } }, required: ["patient_id"] } }, server: { url: serverUrl + "/api/vapi-webhook" } },
+                    { type: "function", function: { name: "create_alert", description: "Create alert for medical team.", parameters: { type: "object", properties: { severity: { type: "string", enum: ["warning", "urgent"] }, type: { type: "string", enum: ["missing_medication", "adverse_reaction", "red_flag"] }, description: { type: "string" }, patient_id: { type: "string" } }, required: ["severity", "type", "description", "patient_id"] } }, server: { url: serverUrl + "/api/vapi-webhook" } },
+                    { type: "function", function: { name: "save_call_report", description: "Save structured call report.", parameters: { type: "object", properties: { patient_id: { type: "string" }, duration_seconds: { type: "integer" }, medications_verified: { type: "integer" }, issues_found: { type: "integer" }, escalations: { type: "integer" }, summary: { type: "string" } }, required: ["patient_id", "summary"] } }, server: { url: serverUrl + "/api/vapi-webhook" } }
+                ]
+            },
+            voice: { provider: "vapi", voiceId: "Elliot" },
+            firstMessage: "Hello, this is AfterCare calling from City Hospital regarding your recent stay. We'd like to check in on how you're doing after your discharge. For verification purposes, could you please confirm your date of birth?",
+            firstMessageMode: "assistant-speaks-first"
+        };
+
+        window.startCall = async function() {
+            if (!publicKey) {
+                setStatus('No public key. Add ?key=YOUR_KEY to URL.', 'error');
+                return;
+            }
+
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('stopBtn').style.display = 'block';
+            setStatus('Connecting...', 'info');
+
+            try {
+                vapi = new Vapi(publicKey);
+
+                vapi.on('call-start', () => setStatus('Call active — speak now!', 'active'));
+                vapi.on('call-end', () => {
+                    setStatus('Call ended', 'info');
+                    document.getElementById('startBtn').style.display = 'block';
+                    document.getElementById('stopBtn').style.display = 'none';
+                });
+                vapi.on('message', (msg) => {
+                    if (msg.type === 'transcript' && msg.transcriptType === 'final') {
+                        addTranscript(msg.role, msg.transcript);
+                    }
+                });
+                vapi.on('error', (err) => {
+                    console.error('Vapi error:', err);
+                    setStatus('Error: ' + (err.message || JSON.stringify(err)), 'error');
+                });
+
+                await vapi.start(assistantConfig);
+            } catch (err) {
+                console.error('Start failed:', err);
+                setStatus('Failed: ' + err.message, 'error');
+                document.getElementById('startBtn').style.display = 'block';
+                document.getElementById('stopBtn').style.display = 'none';
+            }
+        };
+
+        window.stopCall = function() {
+            if (vapi) vapi.stop();
+        };
+    </script>
+</body>
+</html>

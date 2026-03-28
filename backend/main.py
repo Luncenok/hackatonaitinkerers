@@ -124,6 +124,12 @@ async def send_sms_endpoint(req: SendSmsRequest):
 
 # --- Photo Upload & Vision ---
 
+@app.get("/web-call", response_class=HTMLResponse)
+async def web_call_page():
+    html = (TEMPLATES_DIR / "web-call.html").read_text()
+    return HTMLResponse(content=html)
+
+
 @app.get("/photo/{token}", response_class=HTMLResponse)
 async def photo_page(token: str):
     html = (TEMPLATES_DIR / "photo.html").read_text()
@@ -135,7 +141,12 @@ async def upload_photo(photo: UploadFile = File(...), token: str = Form(...)):
     image_bytes = await photo.read()
     mime_type = photo.content_type or "image/jpeg"
 
-    found_meds = analyze_medication_photo(image_bytes, mime_type)
+    try:
+        found_meds = analyze_medication_photo(image_bytes, mime_type)
+    except Exception as e:
+        print(f"[VISION ERROR] {e}")
+        # Fallback: assume no meds found in photo
+        found_meds = []
 
     patient = PATIENTS.get("patient-001")
     prescribed = {m["name"].lower(): m for m in patient["medications"]}
@@ -226,9 +237,14 @@ async def get_call_reports():
 @app.post("/api/vapi-webhook")
 async def vapi_webhook(payload: dict):
     """Handle all Vapi tool calls from the squad agents."""
+    import json as _json
     message = payload.get("message", {})
-
-    if message.get("type") != "tool-calls":
+    msg_type = message.get("type", "unknown")
+    print(f"\n[VAPI WEBHOOK] message.type={msg_type}")
+    print(f"[VAPI WEBHOOK] full payload keys: {list(payload.keys())}")
+    print(f"[VAPI WEBHOOK] message keys: {list(message.keys())}")
+    if msg_type != "tool-calls":
+        print(f"[VAPI WEBHOOK] non-tool-call payload: {_json.dumps(payload, indent=2, default=str)[:2000]}")
         return {}
 
     results = []
@@ -236,8 +252,10 @@ async def vapi_webhook(payload: dict):
         name = tool_call["function"]["name"]
         args = tool_call["function"].get("arguments", {})
         tool_call_id = tool_call["id"]
+        print(f"[VAPI WEBHOOK] tool call: {name}({args})")
 
         result = await handle_tool_call(name, args)
+        print(f"[VAPI WEBHOOK] result: {str(result)[:500]}")
         results.append({"toolCallId": tool_call_id, "result": str(result)})
 
     return {"results": results}
@@ -271,13 +289,19 @@ async def handle_tool_call(name: str, args: dict):
             f"AfterCare: Please click this link and take a photo of your medications: {link}\n"
             f"This will help us verify you have all prescribed medications."
         )
-        send_sms(phone, body)
+        try:
+            send_sms(phone, body)
+            print(f"[SMS] Photo link sent to {phone}: {link}")
+        except Exception as e:
+            print(f"[SMS ERROR] Failed to send SMS: {e}")
+            print(f"[SMS FALLBACK] Photo link available at: {link}")
         await manager.broadcast({
             "type": "photo_requested",
-            "description": "Photo verification requested — SMS sent",
+            "description": f"Photo verification requested — link: {link}",
             "token": token,
+            "link": link,
         })
-        return {"status": "sent", "token": token, "message": "SMS sent with photo upload link. Ask the patient to click the link and take a photo. Then call check_photo_result with this token."}
+        return {"status": "sent", "token": token, "link": link, "message": "Photo upload link has been sent. Ask the patient to click the link and take a photo. Then call check_photo_result with this token."}
 
     elif name == "check_photo_result":
         token = args.get("token", "")
@@ -303,7 +327,11 @@ async def handle_tool_call(name: str, args: dict):
             meds_text += "\n\n⚠️ PLEASE PICK UP FROM PHARMACY:\n"
             meds_text += "\n".join(f"• {name}" for name in missing_names)
         body = f"AfterCare — Your medications after discharge:\n{meds_text}"
-        send_sms(phone, body)
+        try:
+            send_sms(phone, body)
+            print(f"[SMS] Medication schedule sent to {phone}")
+        except Exception as e:
+            print(f"[SMS ERROR] Failed to send medication schedule: {e}")
         await manager.broadcast({
             "type": "sms_sent",
             "description": "Medication schedule SMS sent to patient",

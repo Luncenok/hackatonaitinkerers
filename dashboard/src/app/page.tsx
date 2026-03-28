@@ -1,65 +1,73 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import PatientInfo from "@/components/PatientInfo";
+import LiveCallFeed from "@/components/LiveCallFeed";
+import AlertsPanel from "@/components/AlertsPanel";
+import QualityMetrics from "@/components/QualityMetrics";
+
+interface Patient {
+  id: string;
+  name: string;
+  date_of_birth: string;
+  discharge_date: string;
+  diagnosis: string;
+  medications: { name: string; dosage: string; frequency: string; purpose: string }[];
+}
+
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+export default function Dashboard() {
+  const { events, connected } = useWebSocket(WS_URL);
+  const [patient, setPatient] = useState<Patient | null>(null);
+  const [calling, setCalling] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/patient/patient-001`)
+      .then((r) => r.json())
+      .then(setPatient)
+      .catch(console.error);
+  }, []);
+
+  async function triggerCall() {
+    setCalling(true);
+    try {
+      await fetch(`${API_URL}/api/trigger-call`, { method: "POST" });
+    } catch (err) {
+      console.error("Failed to trigger call:", err);
+    }
+    setCalling(false);
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen p-6">
+      <header className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-800">AfterCare</h1>
+          <p className="text-sm text-slate-500">Post-Discharge Follow-Up Monitor</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+        <div className="flex items-center gap-4">
+          <button
+            onClick={triggerCall}
+            disabled={calling}
+            className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:bg-slate-400"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            {calling ? "Calling..." : "Start Follow-Up Call"}
+          </button>
+          <div className={`flex items-center gap-2 text-sm ${connected ? "text-green-600" : "text-red-500"}`}>
+            <span className={`inline-block h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`} />
+            {connected ? "Connected" : "Disconnected"}
+          </div>
         </div>
-      </main>
+      </header>
+      <div className="grid grid-cols-2 gap-6">
+        <PatientInfo patient={patient} />
+        <LiveCallFeed events={events} />
+        <AlertsPanel events={events} />
+        <QualityMetrics events={events} />
+      </div>
     </div>
   );
 }

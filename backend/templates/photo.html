@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AfterCare — Photo Upload</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #f0f4f8;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 400px;
+            width: 100%;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        h1 { font-size: 20px; color: #1e293b; margin-bottom: 8px; }
+        p { font-size: 14px; color: #64748b; margin-bottom: 24px; }
+        .preview { max-width: 100%; border-radius: 8px; margin-bottom: 16px; display: none; }
+        .btn {
+            display: inline-block;
+            padding: 14px 28px;
+            border-radius: 10px;
+            border: none;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin-bottom: 12px;
+        }
+        .btn-primary { background: #2563eb; color: white; }
+        .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+        .status { margin-top: 16px; font-size: 14px; color: #16a34a; display: none; }
+        .spinner { display: none; margin: 16px auto; width: 32px; height: 32px;
+            border: 3px solid #e2e8f0; border-top-color: #2563eb;
+            border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Medication Photo</h1>
+        <p>Please take a photo of your medications so we can verify them.</p>
+        <img id="preview" class="preview" />
+        <input type="file" id="fileInput" accept="image/*" capture="environment" style="display:none" />
+        <button class="btn btn-primary" id="takePhoto" onclick="document.getElementById('fileInput').click()">
+            Take Photo
+        </button>
+        <button class="btn btn-primary" id="uploadBtn" style="display:none" onclick="upload()">
+            Send Photo
+        </button>
+        <div class="spinner" id="spinner"></div>
+        <div class="status" id="status"></div>
+    </div>
+    <script>
+        const token = window.location.pathname.split('/').pop();
+        const fileInput = document.getElementById('fileInput');
+        const preview = document.getElementById('preview');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const takePhotoBtn = document.getElementById('takePhoto');
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    preview.src = ev.target.result;
+                    preview.style.display = 'block';
+                    uploadBtn.style.display = 'block';
+                    takePhotoBtn.textContent = 'Retake Photo';
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        async function upload() {
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Sending...';
+            document.getElementById('spinner').style.display = 'block';
+
+            const formData = new FormData();
+            formData.append('photo', file);
+            formData.append('token', token);
+
+            try {
+                const resp = await fetch('/api/upload-photo', { method: 'POST', body: formData });
+                const data = await resp.json();
+                document.getElementById('spinner').style.display = 'none';
+                const status = document.getElementById('status');
+                status.style.display = 'block';
+                status.textContent = 'Photo received! You can return to your call.';
+                uploadBtn.style.display = 'none';
+                takePhotoBtn.style.display = 'none';
+            } catch (err) {
+                document.getElementById('spinner').style.display = 'none';
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Send Photo';
+                alert('Upload failed. Please try again.');
+            }
+        }
+    </script>
+</body>
+</html>
